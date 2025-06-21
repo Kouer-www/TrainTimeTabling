@@ -43,10 +43,11 @@ class basic_config():
     min_stay: int = 2
     max_stay: int = 15
     N: int = 2
-    miu: float = 0.1
-    max_steps: float = 20
+    miu: float = 0.01
+    max_steps: float = 50
     schedule_table: list = schedule_table 
     time_costs: list = time_cost
     dist_list: list = dist_list
+    penalty_init: bool = False
     
 
