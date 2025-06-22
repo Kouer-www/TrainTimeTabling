@@ -50,6 +50,6 @@ class basic_config():
     time_costs: list = time_cost # time cost of between stations of trains
     dist_list: list = dist_list # distance list of the stations
     threshold: float = 0.1 # Threshold for SPP
-    sigma: float = 1.5 # sigma used in AUG model
+    sigma: float = 1 # sigma used in AUG model
     
 

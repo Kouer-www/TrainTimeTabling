@@ -77,25 +77,4 @@ class AUGTimetable(Timetable):
             self.vio_record.append(self.total_vio())
             self.upper_record.append(self.upper_bound())
             self.lower_record.append(self.lower_bound())
-    
-    def optim(self):
-        for i in range(self.max_steps):
-            time1 = time.time()
-            self._optim_loop()
-            time2 = time.time()
-            self.time_record.append(time2-time1)
-            text = f"--------------------Process ({i+1}/{self.max_steps})--------------------"
-            metrics = self.metric()
-            for name, value in metrics.items():
-                text += f"\n{name}: {value}"
-            print(text)
-            if (self.lower_record[-1] <= self.upper_record[-1]) and (abs(self.upper_record[-1] - self.lower_record[-1]) < self.threshold * abs(self.upper_record[-1])):
-                print("--------------------Trying SPP ... --------------------")
-                
-                result = self.SPP()
-                print(f"SPP result {result} Trains: {self.total_train(True)}")
-                if result == True:
-                    print("Successfully arranged!!!")
-                    break 
-        self.draw_figure()
             
