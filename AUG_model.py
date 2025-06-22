@@ -62,8 +62,8 @@ class AUGTimetable(Timetable):
                     total += self.nodes_lam[i][j][1] * (self.nodes_vio[i][j][1] + self.nodes_s[i][j][1]) + 0.5 * self.sigma * ((self.nodes_vio[i][j][1] + self.nodes_s[i][j][1])**2)
         return total
     
-    def lower_bound(self):
-        return self.upper_bound() - self._total_vio_s_penalty()
+    def lower_bound(self, SPP_phase = False):
+        return self.upper_bound(SPP_phase) - self._total_vio_s_penalty()
 
     def _optim_loop(self):
         self._reset_usable_table()

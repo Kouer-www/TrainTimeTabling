@@ -240,7 +240,9 @@ class Train:
             result_y[i] = path.node_list[i].time
         return result_x, result_y
     
-    def get_value(self, value_func):
+    def get_value(self, value_func, SPP_phase = False):
+        if SPP_phase == True:
+            return self.SPP_path.get_value(value_func, self)
         return self.path.get_value(value_func, self)
     
 def index_node_table(node_table, node):
@@ -414,18 +416,18 @@ class Timetable:
                     total += max(0, self.vio(Node(i, j, True)))
         return total
     
-    def upper_bound(self):
+    def upper_bound(self, SPP_phase = False):
         # compute the upper bound
         total = 0
         for train in self.trains:
-            total += train.get_value(default_value_func)
+            total += train.get_value(default_value_func, SPP_phase)
         return total
     
-    def lower_bound(self):
+    def lower_bound(self, SPP_phase = False):
         # compute the lower bound
         total = 0
         for train in self.trains:
-            total += train.get_value(self.value_func)
+            total += train.get_value(self.value_func, SPP_phase)
         total += self.total_lam()
         return total
     
@@ -575,7 +577,7 @@ class Timetable:
                 result = self.SPP()
                 print(f"SPP result {result} Trains: {self.total_train(True)}")
                 if result == True:
-                    print("Successfully arranged!!!")
+                    print(f"Successfully arranged!!! Objective function: {self.upper_bound(True)}")
                     break 
         self.draw_figure()
         
