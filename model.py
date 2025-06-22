@@ -2,14 +2,16 @@ from config import *
 from copy import deepcopy
 import numpy as np
 from tqdm import tqdm
+import time
 
 import matplotlib.pyplot as plt 
-"""
-    We first need a definition of nodes. A node is just a pair (state_label, time, if_out)
-"""
+
 COLOR_SET = ["r-", "b-", "g-", "c-", "m-", "y-", "k-"]
     
 class Node:
+    """
+        A node is just a pair (state_label, time, if_out)
+    """
     state_label: int
     time: int # from 0 to max_time-1
     if_out: bool
@@ -27,21 +29,15 @@ class Node:
     def __eq__(self, node):
         return (self.state_label == node.state_label) & (self.time == node.time) & (self.if_out == node.if_out)
 
+# some special Nodes
 ERROR_NODE = Node(-1,-1,False)
 START_NODE = Node(0, 0, False)
 
-class Edge:
-    node_start: Node
-    node_end: Node
-    value: float
-    use: int = 0
-
-    def __init__(self, node_start, node_end):
-        self.node_start = node_start
-        self.node_end = node_end
-        self.use = 0
 
 class Path:
+    """
+        A path is a list of node, with some metrics.
+    """
     node_list: list 
     length: int
     height: int 
@@ -82,7 +78,6 @@ class Path:
     
     def check_node(self, node):
         if node.state_label > self.height:
-            print("Node height exceeded!")
             return False 
         else: 
             node1 = self.node_list[2 * node.state_label]
@@ -93,6 +88,9 @@ class Path:
                 if node2 == node:
                     return True
             return False
+    
+    def check_edge(self, node_start, node_end):
+        return self.check_node(node_start) == True & self.check_node(node_end) == True
     
     def __repr__(self):
         result = "Path: "
@@ -117,9 +115,14 @@ class Path:
                 return False
         return True
 
+# some special Paths
 ERROR_PATH = Path(ERROR_NODE)
 
+
 class PATH_LIST:
+    """
+        A customized data structure to index a path using the last node of the path
+    """
     path_list: list 
     node_list: list
 
@@ -144,7 +147,12 @@ class PATH_LIST:
         return self.path_list[index]
 
 class Train:
-
+    """
+        A train is a combination of the structures above. The most important things are:
+            1. self.path: The path the train currently has
+            2. self.SPP_path: Similar to self.path, but is used in SPP phase.
+            3. _get_delta_in: Return the possible in-degree of a node.
+    """
     def __init__(self, scheduler: list, time_cost: list, config: basic_config):
         assert len(scheduler) == config.num_states
         assert len(time_cost) == config.num_states - 1
@@ -156,12 +164,11 @@ class Train:
         self.max_stay = config.max_stay 
         self.max_time = config.max_time
         self.N = config.N
-        self.init_node = START_NODE
         self.path = ERROR_PATH
         self.SPP_path = ERROR_PATH
 
     def _get_delta_in(self, node: Node):
-        # given a node, return the delta-in of this node as a list. !!!!!!!!!!!!! IF WE NEED TO CONSIDER THE STARTING AND DESTINATION STATION?
+        # Given a node, return the possible nodes which can reach it.
         if node.if_out == False:
             # implies that it's an in-node 
             if node.state_label == 0:
@@ -181,24 +188,6 @@ class Train:
             if node.time < self.config.min_stay:
                 return [ERROR_NODE]
             return [Node(node.state_label, node.time-i, False) for i in range(self.config.min_stay, 1 + min(self.config.max_stay, node.time), 1)]
-    
-    def _get_delta_out(self, node: Node):
-        # given a node, return the delta-out of this node as a list. !!!!!!!!!!!!! IF WE NEED TO CONSIDER THE STARTING AND DESTINATION STATION?
-        try:
-            if node.if_out == False:
-                assert node.state_label != 0
-                assert node.state_label != self.num_states-1
-                assert node.time <= self.config.max_time - self.config.min_stay - 1
-                return [Node(node.state_label, node.time+i, False) for i in range(self.config.min_stay, 1 + min(self.config.max_stay, self.config.max_time-1-node.time), 1)]
-
-            elif node.if_out == True:
-                assert node.state_label != self.num_states - 1
-                time_elapsed = self.time_cost[node.state_label]
-                assert time_elapsed <= self.config.max_time - node.time - 1
-                return [Node(node.start_label+1, node.time+time_elapsed, False)]
-            
-        except:
-            raise ValueError("--------------------Invalid node structure!!!--------------------")
         
     def _forward_two_stage_out(self, node: Node):
         assert node.if_out == True
@@ -222,7 +211,6 @@ class Train:
         if min_time > node.time:
             return time_elapsed, ERROR_NODE, ERROR_NODE
         max_time = min(node.time, time_elapsed + self.max_stay)
-        
         return time_elapsed, Node(node.state_label-1,node.time-max_time, True), Node(node.state_label-1, node.time-min_time, True)
 
     def z(self, node: Node):
@@ -254,7 +242,15 @@ class Train:
     
     def get_value(self, value_func):
         return self.path.get_value(value_func, self)
-        
+    
+def index_node_table(node_table, node):
+    try:
+        return node_table[node.state_label][node.time][1 if node.if_out == True else 0]
+    except: 
+        return None
+
+def check_usable_table(node: Node, usable_table):
+    return index_node_table(usable_table, node) == 1
 
 def default_value_func(node_start: Node, node_end: Node, train: Train):
     assert node_end.time >= node_start.time
@@ -262,18 +258,9 @@ def default_value_func(node_start: Node, node_end: Node, train: Train):
         return -node_end.time
     return -node_end.time+node_start.time
 
-def _get_available_idx(node_list, max_time, N):
-    result = np.ones(max_time)
-    if node_list == []:
-        return list(np.where(result==1)[0])
-    for node in node_list:
-        for j in range(max(0,node.time-N), min(node.time+N, max_time-1)+1):
-            result[j] = 0
-    return list(np.where(result==1)[0])
-
-def check_usable_table(node: Node, usable_table):
-    return usable_table[node.state_label][node.time][1 if node.if_out == True else 0] == 1
-
+"""
+    Main function of optimization
+"""
 def hir_dijkstra(train: Train, max_states: int, value_func, usable_table):
     final_path_list = PATH_LIST()
     init_path = Path(START_NODE)
@@ -351,7 +338,9 @@ def hir_dijkstra(train: Train, max_states: int, value_func, usable_table):
     return final_path_list[max_index]
 
 class Timetable:
-
+    """
+        Basic timetable solver using Lagrange relaxation in Problem 4.
+    """
     def __init__(self, config: basic_config):
         self.config = config
         self.num_states = config.num_states
@@ -360,33 +349,45 @@ class Timetable:
         self.N = config.N
         self.max_steps = config.max_steps
         self.miu = config.miu
+        self.threshold = config.threshold
         self.value_func = default_value_func
         self._init_nodes()
         self._init_trains()
         self._init_draw()
-        self.real_step = 0
 
     def _init_nodes(self):
+        # initialize the lambda table and usable table of nodes.
+        self.nodes_lam = np.ones((self.num_states, self.max_time, 2), dtype=np.float32)
+        self.nodes_usable = np.ones((self.num_states, self.max_time, 2), dtype=np.int8)
+        """
         self.nodes_lam = []
         self.nodes_usable = []
         for i in range(self.num_states):
             self.nodes_lam.append([[1, 1] for time in range(self.max_time)])
             self.nodes_usable.append([[1, 1] for _ in range(self.max_time)])
+        """
 
     def _init_trains(self):
+        # initialize trains
         self.trains = []
         for i in range(self.num_trains):
             self.trains.append(Train(self.config.schedule_table[i], self.config.time_costs[i], self.config))
     
     def _init_draw(self):
+        # initialize records for drawing
         self.vio_record = []
         self.upper_record = []
         self.lower_record = []
+        self.time_record = []
 
     def _reset_usable_table(self):
+        # reset the usable table
+        self.nodes_usable = np.ones((self.num_states, self.max_time, 2), dtype=np.int8)
+        """
         for i in range(self.num_states):
             for j in range(self.max_time):
                 self.nodes_usable[i][j] = [1, 1]
+        """
 
     def y(self, node: Node):
         y = 0
@@ -404,31 +405,32 @@ class Timetable:
         return vio - 1
     
     def total_vio(self):
+        # compute the total violation
         total = 0
         for i in range(self.num_states):
             for j in range(self.max_time):
                 total += max(0, self.vio(Node(i, j, False)))
-                if i != self.num_states-1:
+                if i != self.num_states-1: # We ignore the end point
                     total += max(0, self.vio(Node(i, j, True)))
-        self.vio_record.append(total)
         return total
     
     def upper_bound(self):
+        # compute the upper bound
         total = 0
         for train in self.trains:
             total += train.get_value(default_value_func)
-        self.upper_record.append(total)
         return total
     
     def lower_bound(self):
+        # compute the lower bound
         total = 0
         for train in self.trains:
             total += train.get_value(self.value_func)
         total += self.total_lam()
-        self.lower_record.append(total)
         return total
     
     def total_lam(self):
+        # compute the total lambda
         total = 0
         for i in range(self.num_states):
             for j in range(self.max_time):
@@ -438,6 +440,7 @@ class Timetable:
         return total
     
     def total_train(self, SPP_phase=False):
+        # compute how many trains are used 
         total = 16
         for train in self.trains:
             if SPP_phase == True:
@@ -447,8 +450,18 @@ class Timetable:
             if train.path == ERROR_PATH:
                 total -= 1
         return total
+    
+    def total_time(self):
+        total = 0
+        for i in self.time_record:
+            total += i
+        return total 
+    
+    def recent_time(self):
+        return self.time_record[-1]
 
     def _update_value_func(self):
+        # Add penalty to the value function using Lagrange Relaxation
         def new_value_func(node_start: Node, node_end: Node, train: Train):
             result = default_value_func(node_start, node_end, train)
             node_list = train._get_delta_in(node_end)
@@ -456,7 +469,7 @@ class Timetable:
                 return result
             for node in node_list:
                 if node == node_start:
-                    lam = self.nodes_lam[node_end.state_label][node_end.time][0 if node_end.if_out == False else 1]
+                    lam = index_node_table(self.nodes_lam, node_end)
                     result -= lam * (min(node_end.time+self.N, self.max_time-1) - max(node.time-self.N, 0))
                     break
             return result
@@ -477,11 +490,14 @@ class Timetable:
         4. update lambda and value_func
         """
         self._reset_usable_table()
-        for train in self.trains:
+        for i, train in enumerate(self.trains):
+            print(f"----------Mini Batch ({i+1}/{self.num_trains})----------")
             train.path = hir_dijkstra(train, self.num_states-1, self.value_func, self.nodes_usable)
-            self._update_value_func()
             self._update_lam()
-        
+            self._update_value_func()
+            self.vio_record.append(self.total_vio())
+            self.upper_record.append(self.upper_bound())
+            self.lower_record.append(self.lower_bound())
 
     def draw_timetable(self, output_path = "result/timetable.png", SPP_phase = False):
         print("--------------------Drawing timetable ... --------------------")
@@ -504,11 +520,11 @@ class Timetable:
         print("--------------------Drawing violation ... --------------------")
         y = np.array(self.vio_record)
         plt.figure()
-        plt.xlim(0, self.real_step-1)
+        plt.xlim(0, y.shape[0]-1)
         plt.ylim(0, 1.1 * np.max(y))
         plt.ylabel("Violation")
         plt.xlabel("Steps")
-        plt.plot(np.arange(self.real_step), y, "r-")
+        plt.plot(np.arange(y.shape[0]), y, "r-")
         plt.savefig(output_path)
         plt.close()
     
@@ -517,14 +533,12 @@ class Timetable:
         y1 = np.array(self.upper_record)
         y2 = np.array(self.lower_record)
         plt.figure()
-        plt.xlim(0, self.real_step-1)
+        plt.xlim(0, y1.shape[0]-1)
         plt.ylim(0, 1.1 * min(np.min(y1), np.min(y2)))
         plt.ylabel("Function value")
         plt.xlabel("Steps")
-        print(np.arange(self.real_step))
-        print(y1, y2)
-        plt.plot(np.arange(self.real_step), y1, "r-")
-        plt.plot(np.arange(self.real_step), y2, "b-")
+        plt.plot(np.arange(y1.shape[0]), y1, "r-")
+        plt.plot(np.arange(y1.shape[0]), y2, "b-")
         plt.savefig(output_path)
         plt.close()
 
@@ -540,24 +554,29 @@ class Timetable:
         metric["lower_bound"] = self.lower_bound()
         metric["total_lam"] = self.total_lam()
         metric["total_train"] = self.total_train()
+        metric["total_time"] = self.total_time()
+        metric["recent_time"] = self.recent_time()
         return metric
 
     def optim(self):
-        self.real_step = 0
         for i in range(self.max_steps):
-            self.real_step += 1
+            time1 = time.time()
             self._optim_loop()
+            time2 = time.time()
+            self.time_record.append(time2-time1)
             text = f"--------------------Process ({i+1}/{self.max_steps})--------------------"
             metrics = self.metric()
             for name, value in metrics.items():
                 text += f"\n{name}: {value}"
             print(text)
-            print("--------------------Begin SPP ... --------------------")
-            result = self.SPP()
-            print(f"SPP result {result} Trains: {self.total_train(True)}")
-            if result == True:
-                print("WZW tql!!!" * 10)
-                break 
+            if abs(self.upper_record[-1] - self.lower_record[-1]) < self.threshold * abs(self.upper_record[-1]):
+                print("--------------------Trying SPP ... --------------------")
+                
+                result = self.SPP()
+                print(f"SPP result {result} Trains: {self.total_train(True)}")
+                if result == True:
+                    print("Successfully arranged!!!")
+                    break 
         self.draw_figure()
         
 
